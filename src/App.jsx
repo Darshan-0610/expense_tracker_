@@ -1,17 +1,22 @@
 import { useState } from "react";
+import MonthlyChart from "./components/MonthlyChart";
+import SavingsGoal from "./components/SavingsGoal";
+import DatePicker from "react-datepicker";
+import "react-datepicker/dist/react-datepicker.css";
 
 export default function ExpenseTracker() {
   const [transactions, setTransactions] = useState([]);
   const [description, setDescription] = useState("");
   const [amount, setAmount] = useState("");
+  const [date, setDate] = useState(new Date());
   const [type, setType] = useState("income");
   const [error, setError] = useState("");
 
-  const totalIncome = transactions
+  const totalIncome = (transactions || [])
     .filter((t) => t.type === "income")
     .reduce((sum, t) => sum + t.amount, 0);
 
-  const totalExpenses = transactions
+  const totalExpenses = (transactions || [])
     .filter((t) => t.type === "expense")
     .reduce((sum, t) => sum + t.amount, 0);
 
@@ -22,13 +27,19 @@ export default function ExpenseTracker() {
     const amt = parseFloat(amount);
     if (!amount || isNaN(amt) || amt <= 0)
       return setError("Please enter a valid positive amount.");
+    if (!date) return setError("Please select a date.");
+
+    // Format date to YYYY-MM-DD for storage consistency
+    const formattedDate = date.toISOString().split('T')[0];
+
     setError("");
     setTransactions([
       ...transactions,
-      { id: Date.now(), description: description.trim(), amount: amt, type },
+      { id: Date.now(), date: formattedDate, description: description.trim(), amount: amt, type },
     ]);
     setDescription("");
     setAmount("");
+    setDate(new Date());
     setType("income");
   };
 
@@ -38,6 +49,29 @@ export default function ExpenseTracker() {
 
   const fmt = (n) =>
     new Intl.NumberFormat("en-US", { style: "currency", currency: "USD" }).format(n);
+
+  const exportCSV = () => {
+    if (transactions.length === 0) return;
+
+    const headers = ["Date,Description,Type,Amount"];
+    const rows = transactions.map((t) => {
+      // Use stored date or fallback to ID if legacy
+      const d = t.date || new Date(t.id).toISOString().split('T')[0];
+      return `${d},"${t.description}",${t.type},${t.amount}`;
+    });
+
+    const csvContent = "data:text/csv;charset=utf-8," + [headers, ...rows].join("\n");
+    const encodedUri = encodeURI(csvContent);
+    const link = document.createElement("a");
+    link.setAttribute("href", encodedUri);
+
+    // Filename: transactions_YYYY-MM-DD.csv
+    const today = new Date().toISOString().split('T')[0];
+    link.setAttribute("download", `transactions_${today}.csv`);
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+  };
 
   return (
     <div style={styles.page}>
@@ -66,10 +100,25 @@ export default function ExpenseTracker() {
           </div>
         </div>
 
+        {/* Savings Goal */}
+        <SavingsGoal currentBalance={balance} transactions={transactions} />
+
         <div style={styles.body}>
           {/* Form */}
           <div style={styles.formBox}>
             <h2 style={styles.sectionTitle}>Add New Transaction</h2>
+            <div style={styles.fieldGroup}>
+              <label style={styles.label}>Date</label>
+              <div style={styles.datePickerWrapper}>
+                <DatePicker
+                  selected={date}
+                  onChange={(date) => setDate(date)}
+                  dateFormat="yyyy-MM-dd"
+                  className="custom-datepicker"
+                  wrapperClassName="date-picker-wrapper"
+                />
+              </div>
+            </div>
             <div style={styles.fieldGroup}>
               <label style={styles.label}>Description</label>
               <input
@@ -110,10 +159,23 @@ export default function ExpenseTracker() {
 
           {/* Transaction List */}
           <div style={styles.listBox}>
-            <h2 style={styles.sectionTitle}>
-              Transactions
-              <span style={styles.badge}>{transactions.length}</span>
-            </h2>
+            <div style={styles.transactionsHeader}>
+              <h2 style={styles.sectionTitle}>
+                Transactions
+                <span style={styles.badge}>{transactions.length}</span>
+              </h2>
+              <button
+                style={{
+                  ...styles.exportBtn,
+                  opacity: transactions.length === 0 ? 0.5 : 1,
+                  cursor: transactions.length === 0 ? 'not-allowed' : 'pointer'
+                }}
+                onClick={exportCSV}
+                disabled={transactions.length === 0}
+              >
+                Export CSV
+              </button>
+            </div>
 
             {transactions.length === 0 ? (
               <div style={styles.empty}>
@@ -139,14 +201,17 @@ export default function ExpenseTracker() {
                       </div>
                       <div style={styles.txInfo}>
                         <p style={styles.txDesc}>{t.description}</p>
-                        <p
-                          style={{
-                            ...styles.txType,
-                            color: t.type === "income" ? "#16a34a" : "#dc2626",
-                          }}
-                        >
-                          {t.type.charAt(0).toUpperCase() + t.type.slice(1)}
-                        </p>
+                        <div style={styles.txMeta}>
+                          <span style={styles.txDate}>{t.date || new Date(t.id).toLocaleDateString()}</span>
+                          <span
+                            style={{
+                              ...styles.txType,
+                              color: t.type === "income" ? "#16a34a" : "#dc2626",
+                            }}
+                          >
+                            • {t.type.charAt(0).toUpperCase() + t.type.slice(1)}
+                          </span>
+                        </div>
                       </div>
                       <span
                         style={{
@@ -170,6 +235,9 @@ export default function ExpenseTracker() {
             )}
           </div>
         </div>
+
+        {/* Monthly Trends */}
+        <MonthlyChart transactions={transactions} />
       </div>
     </div>
   );
@@ -252,13 +320,29 @@ const styles = {
     minHeight: 260,
   },
   sectionTitle: {
-    margin: "0 0 18px",
+    margin: 0,
     fontSize: 16,
     fontWeight: 600,
     color: "#111827",
     display: "flex",
     alignItems: "center",
     gap: 10,
+  },
+  transactionsHeader: {
+    display: "flex",
+    justifyContent: "space-between",
+    alignItems: "center",
+    marginBottom: 18,
+  },
+  exportBtn: {
+    padding: "6px 12px",
+    fontSize: 13,
+    fontWeight: 500,
+    color: "#4f46e5",
+    background: "#e0e7ff",
+    border: "none",
+    borderRadius: 6,
+    cursor: "pointer",
   },
   badge: {
     background: "#e0e7ff",
@@ -345,10 +429,20 @@ const styles = {
     fontWeight: 600,
     color: "#111827",
   },
+  txMeta: {
+    display: "flex",
+    alignItems: "center",
+    gap: 6,
+    marginTop: 2,
+  },
+  txDate: {
+    fontSize: 12,
+    color: "#6b7280",
+  },
   txType: {
-    margin: "2px 0 0",
     fontSize: 12,
     fontWeight: 500,
+    margin: 0,
   },
   txAmount: {
     fontSize: 15,
@@ -375,4 +469,26 @@ const styles = {
     padding: "40px 0",
     fontSize: 15,
   },
+  // Custom styles for DatePicker to match existing inputs
+  datePickerWrapper: {
+    width: "100%",
+    '& .react-datepicker-wrapper': {
+      width: '100%',
+    },
+    '& .react-datepicker__input-container': {
+      width: '100%',
+    },
+    '& .custom-datepicker': {
+      display: "block",
+      width: "100%",
+      boxSizing: "border-box",
+      padding: "9px 12px",
+      border: "1px solid #d1d5db",
+      borderRadius: 7,
+      fontSize: 14,
+      color: "#111827",
+      background: "#fff",
+      outline: "none",
+    }
+  }
 };
